@@ -125,7 +125,7 @@ func (s *FunctionalSuite) TestEnvironmentSettingWithSecretsFiles(c *C) {
 
 	var expected = "postgresql://custom_username$&+,%2F%3A;=%3F%40:custom_password$&+,%2F%3A;=%3F%40@localhost:5432/?sslmode=disable"
 
-	dsn, err := GetDataSources()
+	dsn, err := GetDataSources(DataSourceOpts{})
 	if err != nil {
 		c.Errorf("Unexpected error reading datasources")
 	}
@@ -145,7 +145,7 @@ func (s *FunctionalSuite) TestEnvironmentSettingWithDns(c *C) {
 	c.Assert(err, IsNil)
 	defer UnsetEnvironment(c, "DATA_SOURCE_NAME")
 
-	dsn, err := GetDataSources()
+	dsn, err := GetDataSources(DataSourceOpts{})
 	if err != nil {
 		c.Errorf("Unexpected error reading datasources")
 	}
@@ -173,7 +173,7 @@ func (s *FunctionalSuite) TestEnvironmentSettingWithDnsAndSecrets(c *C) {
 	c.Assert(err, IsNil)
 	defer UnsetEnvironment(c, "DATA_SOURCE_PASS")
 
-	dsn, err := GetDataSources()
+	dsn, err := GetDataSources(DataSourceOpts{})
 	if err != nil {
 		c.Errorf("Unexpected error reading datasources")
 	}
@@ -184,6 +184,50 @@ func (s *FunctionalSuite) TestEnvironmentSettingWithDnsAndSecrets(c *C) {
 	if dsn[0] != envDsn {
 		c.Errorf("Expected Username to be read from file. Found=%v, expected=%v", dsn[0], envDsn)
 	}
+}
+
+// test --datasource.* flags: reading secrets from files and the uri flag, and
+// DATA_SOURCE_NAME winning over them
+func (s *FunctionalSuite) TestFlagSettingDataSources(c *C) {
+	cases := []struct {
+		name     string
+		opts     DataSourceOpts
+		expected string
+	}{
+		{
+			name: "user and pass read from files",
+			opts: DataSourceOpts{
+				UserFile: "./tests/username_file",
+				PassFile: "./tests/userpass_file",
+				URI:      "localhost:5432/?sslmode=disable",
+			},
+			expected: "postgresql://custom_username$&+,%2F%3A;=%3F%40:custom_password$&+,%2F%3A;=%3F%40@localhost:5432/?sslmode=disable",
+		},
+	}
+
+	for _, cs := range cases {
+		dsn, err := GetDataSources(cs.opts)
+		c.Assert(err, IsNil, Commentf("case %q", cs.name))
+		c.Assert(dsn, HasLen, 1, Commentf("case %q", cs.name))
+		c.Assert(dsn[0], Equals, cs.expected, Commentf("case %q", cs.name))
+	}
+}
+
+// DATA_SOURCE_NAME env var always wins, even if datasource.* flags are set.
+func (s *FunctionalSuite) TestEnvDSNWinsOverFlags(c *C) {
+	envDsn := "postgresql://envUser:envPass@localhost:5432/?sslmode=disable"
+	err := os.Setenv("DATA_SOURCE_NAME", envDsn)
+	c.Assert(err, IsNil)
+	defer UnsetEnvironment(c, "DATA_SOURCE_NAME")
+
+	dsn, err := GetDataSources(DataSourceOpts{
+		UserFile: "./tests/username_file",
+		PassFile: "./tests/userpass_file",
+		URI:      "localhost:5432/?sslmode=disable",
+	})
+	c.Assert(err, IsNil)
+	c.Assert(dsn, HasLen, 1)
+	c.Assert(dsn[0], Equals, envDsn)
 }
 
 func (s *FunctionalSuite) TestPostgresVersionParsing(c *C) {
